@@ -45,6 +45,7 @@ class DataSource(with_metaclass(ABCMeta)):
         """
         Override this to hand craft conversion of row.
         """
+        #print raw_row, self.mapping.items()
         row = {target: mapping_func(raw_row[source_key])
                for target, (mapping_func, source_key)
                in self.mapping.items()}

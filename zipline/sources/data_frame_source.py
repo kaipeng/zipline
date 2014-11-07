@@ -18,6 +18,7 @@
 Tools to generate data sources.
 """
 import pandas as pd
+import numpy as np
 
 from zipline.gens.utils import hash_args
 
@@ -58,7 +59,7 @@ class DataFrameSource(DataSource):
             'dt': (lambda x: x, 'dt'),
             'sid': (lambda x: x, 'sid'),
             'price': (float, 'price'),
-            'volume': (int, 'volume'),
+            'volume': (lambda x: 0 if x==np.nan else x, 'volume'),
         }
 
     @property
@@ -118,7 +119,7 @@ class DataPanelSource(DataSource):
             'dt': (lambda x: x, 'dt'),
             'sid': (lambda x: x, 'sid'),
             'price': (float, 'price'),
-            'volume': (int, 'volume'),
+            'volume': (lambda x: 0 if x==np.nan else x, 'volume'),
         }
 
         # Add additional fields.
