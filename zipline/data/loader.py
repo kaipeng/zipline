@@ -26,6 +26,8 @@ import pandas as pd
 from pandas.io.data import DataReader
 import pytz
 
+import requests, json, datetime
+
 from six import iteritems
 
 from . import benchmarks
@@ -363,6 +365,112 @@ def load_bars_from_yahoo(indexes=None,
     panel = pd.Panel(data)
     # Rename columns
     panel.minor_axis = ['open', 'high', 'low', 'close', 'volume', 'price']
+    panel.major_axis = panel.major_axis.tz_localize(pytz.utc)
+    # Adjust data
+    if adjusted:
+        adj_cols = ['open', 'high', 'low', 'close']
+        for ticker in panel.items:
+            ratio = (panel[ticker]['price'] / panel[ticker]['close'])
+            ratio_filtered = ratio.fillna(0).values
+            for col in adj_cols:
+                panel[ticker][col] *= ratio_filtered
+    return panel
+
+
+def load_bars_from_bloomberg(intraday=False,
+                         securities=[],
+                         fields=[],
+                         bars=True,
+                         options={},
+                         start=None,
+                         end=None,
+                         adjusted=True
+                         ):
+    """
+    Loads data from Yahoo into a panel with the following
+    column names for each indicated security:
+
+        - open
+        - high
+        - low
+        - close
+        - volume
+        - price
+
+    Note that 'price' is Yahoo's 'Adjusted Close', which removes the
+    impact of splits and dividends. If the argument 'adjusted' is True, then
+    the open, high, low, and close values are adjusted as well.
+
+    :param indexes: Financial indexes to load.
+    :type indexes: dict
+    :param stocks: Stock closing prices to load.
+    :type stocks: list
+    :param start: Retrieve prices from start date on.
+    :type start: datetime
+    :param end: Retrieve prices until end date.
+    :type end: datetime
+    :param adjusted: Adjust open/high/low/close for splits and dividends.
+        The 'price' field is always adjusted.
+    :type adjusted: bool
+
+    """
+    options['adjustmentNormal'] = 'true'
+    options['adjustmentAbnormal'] = 'true'
+    options['adjustmentSplit'] = 'true'
+
+    all_fields = fields
+    if bars:
+        if not intraday:
+            all_fields = ['PX_OPEN', 'PX_HIGH', 'PX_LOW', 'PX_LAST', 'PX_VOLUME', 'LAST_PRICE'] + fields
+            options['fields'] = ','.join(all_fields)
+        else:
+            fields = ['value', 'numEvents']
+            all_fields = ['open', 'high', 'low', 'close', 'volume', 'price'] + fields
+            options['eventType'] = 'trade'
+
+    if not intraday:
+        bloomberg_request_target = 'bdh'
+        if start:
+            options['startDate'] = start.strftime("%Y%m%d")
+        if end:
+            options['endDate'] = end.strftime("%Y%m%d")
+    else:
+        bloomberg_request_target = 'bdp'
+        if start:
+            options['startDateTime'] = start.isoformat()
+        if end:
+            options['endDateTime'] = end.isoformat()
+
+    tickers = []
+    for s in securities:
+        if ' ' not in s:
+            tickers.append(str(s) + ' EQUITY')
+        else:
+            tickers.append(s)
+
+    result_dict = OrderedDict()
+
+    url = "http://10.8.84.65/api/"+bloomberg_request_target
+    for ticker in tickers:
+        options['security'] = ticker
+        print url, options
+        response = requests.get(url, params=options)
+        result = json.loads(response.text)
+        for d in result[0]['data']:
+            try:
+                d['Datetime'] = datetime.datetime.strptime(d['datetime'], "%Y-%m-%d %H:%M:%S.%f")
+            except:
+                d['Datetime'] = datetime.datetime.strptime(d['datetime'], "%Y-%m-%d")
+        result_dict[securities[tickers.index(ticker)]] = pd.DataFrame.from_records(result[0]['data'], columns=['Datetime']+all_fields, index='Datetime')
+        #print securities[tickers.index(ticker)], result_dict[securities[tickers.index(ticker)]]
+
+    #dfs = dict.fromkeys(securities, [pd.DataFrame.from_records(result[i]['data'], columns=['datetime']+all_fields, index='datetime') for i, security in list(enumerate(securities))])
+
+    panel = pd.Panel(result_dict)
+    # Rename columns
+    if bars:
+        all_fields = ['open', 'high', 'low', 'close', 'volume', 'price'] + fields
+    panel.minor_axis = all_fields
     panel.major_axis = panel.major_axis.tz_localize(pytz.utc)
     # Adjust data
     if adjusted:

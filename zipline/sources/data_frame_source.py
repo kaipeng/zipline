@@ -59,7 +59,7 @@ class DataFrameSource(DataSource):
             'dt': (lambda x: x, 'dt'),
             'sid': (lambda x: x, 'sid'),
             'price': (float, 'price'),
-            'volume': (lambda x: 0 if x==np.nan else x, 'volume'),
+            'volume': (lambda x: 0 if x == np.nan else x, 'volume'),
         }
 
     @property

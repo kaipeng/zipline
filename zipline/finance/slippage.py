@@ -214,7 +214,10 @@ class VolumeShareSlippage(SlippageModel):
 
         # the current order amount will be the min of the
         # volume available in the bar or the open amount.
-        cur_volume = int(min(remaining_volume, abs(order.open_amount)))
+        try:
+            cur_volume = int(min(remaining_volume, abs(order.open_amount)))
+        except:
+            cur_volume = 0
 
         if cur_volume < 1:
             return

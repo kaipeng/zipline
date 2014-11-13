@@ -779,7 +779,14 @@ class HistoryContainer(object):
         elif field == 'low':
             return frame.min().values
         else:
-            raise ValueError("Unknown field {}".format(field))
+            #print frame.mean().values
+
+            try:
+                #return frame.ffill().iloc[-1].values
+                return frame.mean().values
+                pass
+            except:
+                raise ValueError("Unknown field {}".format(field))
 
     def aggregate_ohlcv_panel(self, fields, ohlcv_panel):
         """
