@@ -18,6 +18,7 @@ import six
 
 import numpy as np
 from datetime import timedelta
+import pandas as pd
 
 from zipline.sources.data_source import DataSource
 from zipline.utils import tradingcalendar as calendar_nyse
@@ -31,8 +32,10 @@ class RandomWalkSource(DataSource):
     user-defined frequencies (e.g. minutely).
 
     """
+    VALID_FREQS = frozenset(('daily', 'minute'))
+
     def __init__(self, start_prices=None, freq='minute', start=None,
-                 end=None, calendar=calendar_nyse):
+                 end=None, drift=0.1, sd=0.1, calendar=calendar_nyse):
         """
         :Arguments:
             start_prices : dict
@@ -40,11 +43,15 @@ class RandomWalkSource(DataSource):
                  Default: {0: 100, 1: 500}
             freq : str <default='minute'>
                  Emits events according to freq.
-                 Can be 'day' or 'minute'
+                 Can be 'daily' or 'minute'
             start : datetime <default=start of calendar>
                  Start dt to emit events.
             end : datetime <default=end of calendar>
                  End dt until to which emit events.
+            drift: float <default=0.1>
+                 Constant drift of the price series.
+            sd: float <default=0.1>
+                 Standard deviation of the price series.
             calendar : calendar object <default: NYSE>
                  Calendar to use.
                  See zipline.utils for different choices.
@@ -60,6 +67,9 @@ class RandomWalkSource(DataSource):
         # Hash_value for downstream sorting.
         self.arg_string = hash_args(start_prices, freq, start, end,
                                     calendar.__name__)
+
+        if freq not in self.VALID_FREQS:
+            raise ValueError('%s not in %s' % (freq, self.VALID_FREQS))
 
         self.freq = freq
         if start_prices is None:
@@ -78,8 +88,8 @@ class RandomWalkSource(DataSource):
         else:
             self.end = end
 
-        self.drift = .1
-        self.sd = .1
+        self.drift = drift
+        self.sd = sd
 
         self.sids = self.start_prices.keys()
 
@@ -134,9 +144,10 @@ class RandomWalkSource(DataSource):
                     for event in self._gen_events(cur_prices, current_dt):
                         yield event
                     current_dt += timedelta(minutes=1)
-            elif self.freq == 'day':
+            elif self.freq == 'daily':
                 # Emit one signal per day at close
-                for event in self._gen_events(cur_prices, close_dt):
+                for event in self._gen_events(
+                        cur_prices, pd.tslib.normalize_date(close_dt)):
                     yield event
 
     @property

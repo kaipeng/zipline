@@ -113,7 +113,7 @@ class TestRandomWalkSource(TestCase):
         end = pd.Timestamp('1992-01-01', tz='UTC')
         source = RandomWalkSource(start_prices=start_prices,
                                   calendar=calendar_nyse, start=start,
-                                  end=end, freq='day')
+                                  end=end, freq='daily')
         self.assertIsInstance(source.start, pd.lib.Timestamp)
         self.assertIsInstance(source.end, pd.lib.Timestamp)
 
@@ -125,6 +125,4 @@ class TestRandomWalkSource(TestCase):
             self.assertLess(event.dt, end)
             self.assertGreater(event.price, 0,
                                "price should never go negative.")
-            self.assertTrue(13 <= event.dt.hour <= 21,
-                            "event.dt.hour == %i, not during market \
-                            hours." % event.dt.hour)
+            self.assertEqual(event.dt.hour, 0)

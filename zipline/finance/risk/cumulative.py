@@ -163,7 +163,8 @@ class RiskMetricsCumulative(object):
         self.latest_dt = cont_index[0]
 
         self.metrics = pd.DataFrame(index=cont_index,
-                                    columns=self.METRIC_NAMES)
+                                    columns=self.METRIC_NAMES,
+                                    dtype=float)
 
         self.drawdowns = pd.Series(index=cont_index)
         self.max_drawdowns = pd.Series(index=cont_index)
@@ -440,8 +441,13 @@ algorithm_returns ({algo_count}) in range {start} : {end} on {dt}"
         if len(self.annualized_mean_returns) < 2:
             return 0.0
 
-        returns_matrix = np.vstack([self.algorithm_returns,
-                                    self.benchmark_returns])
+        # Drop nans if there are gaps in the data
+        algorithm_returns = self.algorithm_returns.dropna()
+        benchmark_returns = \
+            self.benchmark_returns.loc[algorithm_returns.index]
+
+        returns_matrix = np.vstack([algorithm_returns,
+                                    benchmark_returns])
         C = np.cov(returns_matrix, ddof=1)
         algorithm_covariance = C[0][1]
         benchmark_variance = C[1][1]

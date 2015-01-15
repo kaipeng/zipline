@@ -23,7 +23,11 @@ from datetime import datetime
 
 from itertools import groupby, chain
 from six.moves import filter
-from six import iteritems, exec_
+from six import (
+    exec_,
+    iteritems,
+    string_types,
+)
 from operator import attrgetter
 
 from zipline.errors import (
@@ -90,13 +94,13 @@ class TradingAlgorithm(object):
 
     A new algorithm could look like this:
     ```
-    from zipline.api import order
+    from zipline.api import order, symbol
 
     def initialize(context):
-        context.sid = 'AAPL'
+        context.sid = symbol('AAPL')
         context.amount = 100
 
-    def handle_data(self, data):
+    def handle_data(context, data):
         sid = context.sid
         amount = context.amount
         order(sid, amount)
@@ -148,7 +152,7 @@ class TradingAlgorithm(object):
         self._recorded_vars = {}
         self.namespace = kwargs.get('namespace', {})
 
-        self._environment = kwargs.pop('environment', 'zipline')
+        self._platform = kwargs.pop('platform', 'zipline')
 
         self.logger = None
 
@@ -197,7 +201,9 @@ class TradingAlgorithm(object):
         self.event_manager = EventManager()
 
         if self.algoscript is not None:
-            exec_(self.algoscript, self.namespace)
+            filename = kwargs.pop('algo_filename', '<string>')
+            code = compile(self.algoscript, filename, 'exec')
+            exec_(code, self.namespace)
             self._initialize = self.namespace.get('initialize')
             if 'handle_data' not in self.namespace:
                 raise ValueError('You must define a handle_data function.')
@@ -503,27 +509,59 @@ class TradingAlgorithm(object):
 
         return daily_stats
 
-    def add_transform(self, transform_class, tag, *args, **kwargs):
-        """Add a single-sid, sequential transform to the model.
+    @api_method
+    def add_transform(self, transform, days=None):
+        """
+        Ensures that the history container will have enough size to service
+        a simple transform.
 
         :Arguments:
-            transform_class : class
-                Which transform to use. E.g. mavg.
-            tag : str
-                How to name the transform. Can later be access via:
-                data[sid].tag()
-
-        Extra args and kwargs will be forwarded to the transform
-        instantiation.
-
+            transform : string
+                The transform to add. must be an element of:
+                {'mavg', 'stddev', 'vwap', 'returns'}.
+            days : int <default=None>
+                The maximum amount of days you will want for this transform.
+                This is not needed for 'returns'.
         """
-        self.registered_transforms[tag] = {'class': transform_class,
-                                           'args': args,
-                                           'kwargs': kwargs}
+        if transform not in {'mavg', 'stddev', 'vwap', 'returns'}:
+            raise ValueError('Invalid transform')
+
+        if transform == 'returns':
+            if days is not None:
+                raise ValueError('returns does use days')
+
+            self.add_history(2, '1d', 'price')
+            return
+        elif days is None:
+            raise ValueError('no number of days specified')
+
+        if self.sim_params.data_frequency == 'daily':
+            mult = 1
+            freq = '1d'
+        else:
+            mult = 390
+            freq = '1m'
+
+        bars = mult * days
+        self.add_history(bars, freq, 'price')
+
+        if transform == 'vwap':
+            self.add_history(bars, freq, 'volume')
 
     @api_method
-    def get_environment(self):
-        return self._environment
+    def get_environment(self, field='platform'):
+        env = {
+            'arena': self.sim_params.arena,
+            'data_frequency': self.sim_params.data_frequency,
+            'start': self.sim_params.first_open,
+            'end': self.sim_params.last_close,
+            'capital_base': self.sim_params.capital_base,
+            'platform': self._platform
+        }
+        if field == '*':
+            return env
+        else:
+            return env[field]
 
     def add_event(self, rule=None, callback=None):
         """
@@ -570,13 +608,20 @@ class TradingAlgorithm(object):
             self._recorded_vars[name] = value
 
     @api_method
-    def symbol(self, symbol_str, as_of_date=None):
+    def symbol(self, symbol_str):
         """
         Default symbol lookup for any source that directly maps the
         symbol to the identifier (e.g. yahoo finance).
-        Keyword argument as_of_date is ignored.
         """
         return symbol_str
+
+    @api_method
+    def symbols(self, *args):
+        """
+        Default symbols lookup for any source that directly maps the
+        symbol to the identifier (e.g. yahoo finance).
+        """
+        return args
 
     @api_method
     def order(self, sid, amount,
@@ -764,7 +809,9 @@ class TradingAlgorithm(object):
         assert date_copy.tzinfo == pytz.utc, \
             "Algorithm should have a utc datetime"
         if tz is not None:
-            date_copy = date_copy.tz_convert(tz)
+            if isinstance(tz, string_types):
+                tz = pytz.timezone(tz)
+            date_copy = date_copy.astimezone(tz)
         return date_copy
 
     def set_transact(self, transact):

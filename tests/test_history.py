@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from pandas.util.testing import assert_frame_equal
 
-from zipline.history import history, Frequency
+from zipline.history import history
 from zipline.history.history_container import HistoryContainer
 from zipline.protocol import BarData
 import zipline.utils.factory as factory
@@ -874,7 +874,11 @@ def handle_data(context, data):
         np.testing.assert_almost_equal(recorded_ma,
                                        159.76304468946876)
 
-    def test_history_container_constructed_at_runtime(self):
+    @parameterized.expand([
+        ('daily',),
+        ('minute',),
+    ])
+    def test_history_container_constructed_at_runtime(self, data_freq):
         algo_text = dedent(
             """\
             from zipline.api import history
@@ -889,17 +893,17 @@ def handle_data(context, data):
             period_start=start,
             period_end=end,
             capital_base=float("1.0e5"),
-            data_frequency='minute',
-            emission_rate='daily'
+            data_frequency=data_freq,
+            emission_rate=data_freq
         )
 
         test_algo = TradingAlgorithm(
             script=algo_text,
-            data_frequency='minute',
+            data_frequency=data_freq,
             sim_params=sim_params
         )
 
-        source = RandomWalkSource(start=start, end=end)
+        source = RandomWalkSource(start=start, end=end, freq=data_freq)
 
         self.assertIsNone(test_algo.history_container)
         test_algo.run(source)
@@ -909,13 +913,6 @@ def handle_data(context, data):
         )
 
         container = test_algo.history_container
-        self.assertEqual(
-            container.buffer_panel.window_length,
-            Frequency.MAX_MINUTES['d'],
-            msg='HistoryContainer.buffer_panel was not large enough to service'
-            ' the given HistorySpec',
-        )
-
         self.assertEqual(
             len(container.digest_panels),
             1,
@@ -934,6 +931,102 @@ def handle_data(context, data):
             msg='The digest panel is not large enough to service the given'
             ' HistorySpec',
         )
+
+    @parameterized.expand([
+        (1,),
+        (2,),
+    ])
+    def test_history_grow_length_inter_bar(self, incr):
+        """
+        Tests growing the length of a digest panel with different date_buf
+        deltas once per bar.
+        """
+        algo_text = dedent(
+            """\
+            from zipline.api import history
+
+
+            def initialize(context):
+                context.bar_count = 1
+
+
+            def handle_data(context, data):
+                prices = history(context.bar_count, '1d', 'price')
+                context.test_case.assertEqual(len(prices), context.bar_count)
+                context.bar_count += {incr}
+            """
+        ).format(incr=incr)
+        start = pd.Timestamp('2007-04-05', tz='UTC')
+        end = pd.Timestamp('2007-04-10', tz='UTC')
+
+        sim_params = SimulationParameters(
+            period_start=start,
+            period_end=end,
+            capital_base=float("1.0e5"),
+            data_frequency='minute',
+            emission_rate='daily'
+        )
+
+        test_algo = TradingAlgorithm(
+            script=algo_text,
+            data_frequency='minute',
+            sim_params=sim_params
+        )
+        test_algo.test_case = self
+
+        source = RandomWalkSource(start=start, end=end)
+
+        self.assertIsNone(test_algo.history_container)
+        test_algo.run(source)
+
+    @parameterized.expand([
+        (1,),
+        (2,),
+    ])
+    def test_history_grow_length_intra_bar(self, incr):
+        """
+        Tests growing the length of a digest panel with different date_buf
+        deltas in a single bar.
+        """
+        algo_text = dedent(
+            """\
+            from zipline.api import history
+
+
+            def initialize(context):
+                context.bar_count = 1
+
+
+            def handle_data(context, data):
+                prices = history(context.bar_count, '1d', 'price')
+                context.test_case.assertEqual(len(prices), context.bar_count)
+                context.bar_count += {incr}
+                prices = history(context.bar_count, '1d', 'price')
+                context.test_case.assertEqual(len(prices), context.bar_count)
+            """
+        ).format(incr=incr)
+        start = pd.Timestamp('2007-04-05', tz='UTC')
+        end = pd.Timestamp('2007-04-10', tz='UTC')
+
+        sim_params = SimulationParameters(
+            period_start=start,
+            period_end=end,
+            capital_base=float("1.0e5"),
+            data_frequency='minute',
+            emission_rate='daily'
+        )
+
+        test_algo = TradingAlgorithm(
+            script=algo_text,
+            data_frequency='minute',
+            sim_params=sim_params
+        )
+        test_algo.test_case = self
+
+        source = RandomWalkSource(start=start, end=end)
+
+        self.assertIsNone(test_algo.history_container)
+        test_algo.run(source)
 
 
 class TestHistoryContainerResize(TestCase):

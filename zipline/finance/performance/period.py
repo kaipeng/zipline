@@ -140,15 +140,20 @@ class PerformancePeriod(object):
         self.orders_by_modified = defaultdict(OrderedDict)
         self.orders_by_id = OrderedDict()
 
-    def ensure_position_index(self, sid):
+    def set_position_amount(self, sid, amount):
         try:
-            self._position_amounts[sid]
-            self._position_last_sale_prices[sid]
+            self._position_amounts[sid] = amount
         except (KeyError, IndexError):
             self._position_amounts = \
-                self._position_amounts.append(pd.Series({sid: 0.0}))
+                self._position_amounts.append(pd.Series({sid: amount}))
+
+    def set_position_last_sale_price(self, sid, last_sale_price):
+        try:
+            self._position_last_sale_prices[sid] = last_sale_price
+        except (KeyError, IndexError):
             self._position_last_sale_prices = \
-                self._position_last_sale_prices.append(pd.Series({sid: 0.0}))
+                self._position_last_sale_prices.append(
+                    pd.Series({sid: last_sale_price}))
 
     def handle_split(self, split):
         if split.sid in self.positions:
@@ -156,9 +161,9 @@ class PerformancePeriod(object):
             # leftover cash from a fractional share, if there is any.
             position = self.positions[split.sid]
             leftover_cash = position.handle_split(split)
-            self._position_amounts[split.sid] = position.amount
-            self._position_last_sale_prices[split.sid] = \
-                position.last_sale_price
+            self.set_position_amount(split.sid, position.amount)
+            self.set_position_last_sale_price(split.sid,
+                                              position.last_sale_price)
 
             if leftover_cash > 0:
                 self.handle_cash_payment(leftover_cash)
@@ -219,10 +224,9 @@ class PerformancePeriod(object):
             position = self.positions[stock]
 
             position.amount += share_count
-            self.ensure_position_index(stock)
-            self._position_amounts[stock] = position.amount
-            self._position_last_sale_prices[stock] = \
-                position.last_sale_price
+            self.set_position_amount(stock, position.amount)
+            self.set_position_last_sale_price(stock,
+                                              position.last_sale_price)
 
         # Recalculate performance after applying dividend benefits.
         self.calculate_performance()
@@ -285,14 +289,13 @@ class PerformancePeriod(object):
     def update_position(self, sid, amount=None, last_sale_price=None,
                         last_sale_date=None, cost_basis=None):
         pos = self.positions[sid]
-        self.ensure_position_index(sid)
 
         if amount is not None:
             pos.amount = amount
-            self._position_amounts[sid] = amount
+            self.set_position_amount(sid, amount)
         if last_sale_price is not None:
             pos.last_sale_price = last_sale_price
-            self._position_last_sale_prices[sid] = last_sale_price
+            self.set_position_last_sale_price(sid, last_sale_price)
         if last_sale_date is not None:
             pos.last_sale_date = last_sale_date
         if cost_basis is not None:
@@ -306,9 +309,8 @@ class PerformancePeriod(object):
         # an empty position if one does not already exist.
         position = self.positions[txn.sid]
         position.update(txn)
-        self.ensure_position_index(txn.sid)
-        self._position_amounts[txn.sid] = position.amount
-        self._position_last_sale_prices[txn.sid] = position.last_sale_price
+        self.set_position_amount(txn.sid, position.amount)
+        self.set_position_last_sale_price(txn.sid, position.last_sale_price)
 
         self.period_cash_flow -= txn.price * txn.amount
 
@@ -317,6 +319,50 @@ class PerformancePeriod(object):
 
     def calculate_positions_value(self):
         return np.dot(self._position_amounts, self._position_last_sale_prices)
+
+    def _longs_count(self):
+        longs = self._position_amounts[self._position_amounts > 0]
+        return longs.count()
+
+    def _long_exposure(self):
+        pos_values = self._position_amounts * self._position_last_sale_prices
+        longs = pos_values[pos_values > 0]
+        return longs.sum()
+
+    def _shorts_count(self):
+        shorts = self._position_amounts[self._position_amounts < 0]
+        return shorts.count()
+
+    def _short_exposure(self):
+        pos_values = self._position_amounts * self._position_last_sale_prices
+        shorts = pos_values[pos_values < 0]
+        return shorts.sum()
+
+    def _gross_exposure(self):
+        return self._long_exposure() + abs(self._short_exposure())
+
+    def _net_exposure(self):
+        return self.calculate_positions_value()
+
+    @property
+    def _net_liquidation_value(self):
+        return self.ending_cash + \
+            self._long_exposure() + \
+            self._short_exposure()
+
+    def _gross_leverage(self):
+        net_liq = self._net_liquidation_value
+        if net_liq != 0:
+            return self._gross_exposure() / net_liq
+
+        return np.inf
+
+    def _net_leverage(self):
+        net_liq = self._net_liquidation_value
+        if net_liq != 0:
+            return self._net_exposure() / net_liq
+
+        return np.inf
 
     def update_last_sale(self, event):
         if event.sid not in self.positions:
@@ -343,7 +389,13 @@ class PerformancePeriod(object):
             'pnl': self.pnl,
             'returns': self.returns,
             'period_open': self.period_open,
-            'period_close': self.period_close
+            'period_close': self.period_close,
+            'gross_leverage': self._gross_leverage(),
+            'net_leverage': self._net_leverage(),
+            'short_exposure': self._short_exposure(),
+            'long_exposure': self._long_exposure(),
+            'longs_count': self._longs_count(),
+            'shorts_count': self._shorts_count()
         }
 
         return rval
@@ -449,11 +501,10 @@ class PerformancePeriod(object):
         account.day_trades_remaining = \
             getattr(self, 'day_trades_remaining', float('inf'))
         account.leverage = \
-            getattr(self, 'leverage',
-                    self.ending_value / (self.ending_value + self.ending_cash))
+            getattr(self, 'leverage', self._gross_leverage())
+        account.net_leverage = self._net_leverage()
         account.net_liquidation = \
-            getattr(self, 'net_liquidation',
-                    self.ending_cash + self.ending_value)
+            getattr(self, 'net_liquidation', self._net_liquidation_value)
         return account
 
     def get_positions(self):

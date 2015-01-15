@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #
 # Copyright 2014 Quantopian, Inc.
 #
@@ -13,12 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import threading
+context = threading.local()
 
-import sys
 
-from zipline.utils import parse_args, run_pipeline
+def get_algo_instance():
+    return getattr(context, 'algorithm', None)
 
-if __name__ == "__main__":
-    parsed = parse_args(sys.argv[1:])
-    run_pipeline(print_algo=True, **parsed)
-    sys.exit(0)
+
+def set_algo_instance(algo):
+    context.algorithm = algo

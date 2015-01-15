@@ -359,7 +359,7 @@ class BeforeClose(StatelessRule):
         self._dt = None
 
     def should_trigger(self, dt):
-        return self._get_close(dt) - self.offset < dt
+        return self._get_close(dt) - self.offset <= dt
 
     def _get_close(self, dt):
         """
@@ -502,8 +502,17 @@ class NDaysBeforeLastTradingDayOfMonth(StatelessRule):
     def get_last_trading_day_of_month(self, dt):
         self.month = dt.month
 
+        if dt.month == 12:
+            # Roll the year foward and start in January.
+            year = dt.year + 1
+            month = 1
+        else:
+            # Increment the month in the same year.
+            year = dt.year
+            month = dt.month + 1
+
         self.last_day = self.env.previous_trading_day(
-            dt.replace(month=(dt.month % 12) + 1, day=1)
+            dt.replace(year=year, month=month, day=1)
         ).date()
         return self.last_day
 

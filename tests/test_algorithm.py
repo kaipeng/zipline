@@ -81,7 +81,6 @@ from zipline.sources import (SpecificEquityTrades,
                              DataPanelSource,
                              RandomWalkSource)
 
-from zipline.transforms import MovingAverage
 from zipline.finance.execution import LimitOrder
 from zipline.finance.trading import SimulationParameters
 from zipline.utils.api_support import set_algo_instance
@@ -136,6 +135,28 @@ class TestMiscellaneousAPI(TestCase):
             sim_params=self.sim_params,
             concurrent=True,
         )
+
+    def test_get_environment(self):
+        expected_env = {
+            'arena': 'backtest',
+            'data_frequency': 'minute',
+            'start': pd.Timestamp('2006-01-03 14:31:00+0000', tz='UTC'),
+            'end': pd.Timestamp('2006-01-04 21:00:00+0000', tz='UTC'),
+            'capital_base': 100000.0,
+            'platform': 'zipline'
+        }
+
+        def initialize(algo):
+            self.assertEqual('zipline', algo.get_environment())
+            self.assertEqual(expected_env, algo.get_environment('*'))
+
+        def handle_data(algo, data):
+            pass
+
+        algo = TradingAlgorithm(initialize=initialize,
+                                handle_data=handle_data,
+                                sim_params=self.sim_params)
+        algo.run(self.source)
 
     def test_get_open_orders(self):
 
@@ -335,19 +356,6 @@ class TestTransformAlgorithm(TestCase):
 
         np.testing.assert_array_equal(res1, res2)
 
-    def test_transform_registered(self):
-        algo = TestRegisterTransformAlgorithm(
-            sim_params=self.sim_params,
-            sids=[133]
-        )
-
-        algo.run(self.source)
-        assert 'mavg' in algo.registered_transforms
-        assert algo.registered_transforms['mavg']['args'] == (['price'],)
-        assert algo.registered_transforms['mavg']['kwargs'] == \
-            {'window_length': 2, 'market_aware': True}
-        assert algo.registered_transforms['mavg']['class'] is MovingAverage
-
     def test_data_frequency_setting(self):
         self.sim_params.data_frequency = 'daily'
         algo = TestRegisterTransformAlgorithm(
@@ -495,11 +503,11 @@ class TestAlgoScript(TestCase):
         algo.run(self.df)
 
     def test_api_get_environment(self):
-        environment = 'zipline'
+        platform = 'zipline'
         algo = TradingAlgorithm(script=api_get_environment_algo,
-                                environment=environment)
+                                platform=platform)
         algo.run(self.df)
-        self.assertEqual(algo.environment, environment)
+        self.assertEqual(algo.environment, platform)
 
     def test_api_symbol(self):
         algo = TradingAlgorithm(script=api_symbol_algo)
